@@ -1,82 +1,275 @@
+"""
+Data loading module for character recognition neural network training.
+
+Supported datasets:
+- EMNIST ByClass: 814,255 samples — digits (0–9), uppercase (A–Z), lowercase (a–z) = 62 classes
+- EMNIST ByMerge: 814,255 samples — merged similar characters = 47 classes
+- EMNIST Letters: 145,600 samples — uppercase + lowercase letters = 37 classes
+- EMNIST Digits:  280,000 samples — digits only = 10 classes
+- EMNIST MNIST:   70,000 samples  — digits only (MNIST-compatible) = 10 classes
+- MNIST:          70,000 samples  — digits only = 10 classes
+- KMNIST:         70,000 samples  — 10 Hiragana characters = 10 classes
+
+All images are 28x28 grayscale, returned as numpy arrays with shape (N, 28, 28, 1).
+Labels are integer-encoded.
+
+EMNIST ByClass label mapping:
+  0–9   → '0'–'9'
+  10–35 → 'A'–'Z'
+  36–61 → 'a'–'z'
+"""
+
 import tensorflow_datasets as tfds
-import os
 import numpy as np
-from tensorflow.keras.preprocessing.image import img_to_array, load_img
+import matplotlib.pyplot as plt
+import random
 
-def load_emnist():
-    """
-    Loads EMNIST ByClass dataset (digits + uppercase + lowercase letters)
-    Returns: (x_train, y_train), (x_test, y_test) as numpy arrays
-    """
-    print("Loading EMNIST ByClass dataset...")
+# ──────────────────────────────────────────────
+# Label maps
+# ──────────────────────────────────────────────
 
-    ds_train = tfds.load('emnist/byclass', split='train', as_supervised=True)
-    ds_test = tfds.load('emnist/byclass', split='test', as_supervised=True)
+# EMNIST ByClass / ByMerge: 62 classes
+EMNIST_BYCLASS_LABELS = (
+    [str(d) for d in range(10)]          # 0–9  → digits
+    + [chr(c) for c in range(65, 91)]    # 10–35 → A–Z
+    + [chr(c) for c in range(97, 123)]   # 36–61 → a–z
+)
 
-    # Convert to numpy arrays
-    x_train = np.array([np.array(image) for image, label in tfds.as_numpy(ds_train)])
-    y_train = np.array([label for image, label in tfds.as_numpy(ds_train)])
-    x_test = np.array([np.array(image) for image, label in tfds.as_numpy(ds_test)])
-    y_test = np.array([label for image, label in tfds.as_numpy(ds_test)])
+# EMNIST Letters: 37 classes (index 0 = N/A, 1–26 → A/a … Z/z)
+EMNIST_LETTERS_LABELS = ['N/A'] + [chr(c) for c in range(65, 91)]
 
-    print(f"EMNIST loaded: {x_train.shape[0]} train, {x_test.shape[0]} test samples")
+# EMNIST Digits / MNIST / KMNIST: 10 classes
+DIGIT_LABELS = [str(d) for d in range(10)]
+
+KMNIST_LABELS = ['お', 'き', 'す', 'つ', 'な', 'は', 'ま', 'や', 'れ', 'を']
+
+
+# ──────────────────────────────────────────────
+# Internal helpers
+# ──────────────────────────────────────────────
+
+def _tfds_to_numpy(dataset):
+    """Convert a supervised tf.data.Dataset to (x, y) numpy arrays."""
+    images, labels = [], []
+    for image, label in tfds.as_numpy(dataset):
+        images.append(image)
+        labels.append(label)
+    return np.array(images, dtype=np.uint8), np.array(labels, dtype=np.int32)
+
+
+def _load_tfds(name, split_train='train', split_test='test'):
+    """Generic loader for tensorflow_datasets supervised datasets."""
+    print(f"  Downloading / loading '{name}' — train split …")
+    ds_train = tfds.load(name, split=split_train, as_supervised=True)
+    print(f"  Downloading / loading '{name}' — test split …")
+    ds_test  = tfds.load(name, split=split_test,  as_supervised=True)
+
+    x_train, y_train = _tfds_to_numpy(ds_train)
+    x_test,  y_test  = _tfds_to_numpy(ds_test)
 
     return (x_train, y_train), (x_test, y_test)
 
-def load_custom_symbols(symbols_dir):
+
+# ──────────────────────────────────────────────
+# Public loaders
+# ──────────────────────────────────────────────
+
+def load_emnist_byclass():
     """
-    Loads custom symbol images from a folder
-    Args:
-        symbols_dir: path to folder containing subfolders per symbol
-    Returns:
-        x_data, y_data as numpy arrays
+    EMNIST ByClass — largest split.
+    62 classes: digits 0–9, uppercase A–Z, lowercase a–z.
+    ~697,932 train / ~116,323 test samples.
+
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [0 .. 61]
     """
-    print("Loading custom symbols...")
+    print("Loading EMNIST ByClass …")
+    data = _load_tfds('emnist/byclass')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    print(f"  Classes: {len(EMNIST_BYCLASS_LABELS)}  →  {EMNIST_BYCLASS_LABELS}")
+    return (x_train, y_train), (x_test, y_test)
 
-    x_data = []
-    y_data = []
-    classes = sorted(os.listdir(symbols_dir))
-    class_map = {cls:i for i, cls in enumerate(classes)}
 
-    for cls in classes:
-        cls_folder = os.path.join(symbols_dir, cls)
-        for img_file in os.listdir(cls_folder):
-            img_path = os.path.join(cls_folder, img_file)
-            img = load_img(img_path, color_mode='grayscale', target_size=(28,28))
-            img_array = img_to_array(img)
-            x_data.append(img_array)
-            y_data.append(class_map[cls])
+def load_emnist_bymerge():
+    """
+    EMNIST ByMerge — 47 classes (uppercase/lowercase merged for visually similar chars).
+    ~697,932 train / ~116,323 test samples.
 
-    x_data = np.array(x_data)
-    y_data = np.array(y_data)
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [0 .. 46]
+    """
+    print("Loading EMNIST ByMerge …")
+    data = _load_tfds('emnist/bymerge')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    return (x_train, y_train), (x_test, y_test)
 
-    print(f"Custom symbols loaded: {x_data.shape[0]} samples")
 
-    return x_data, y_data
+def load_emnist_letters():
+    """
+    EMNIST Letters — 37 classes (letters only, upper/lower merged).
+    ~124,800 train / ~20,800 test samples.
 
-# Example usage (comment out when importing)
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [1 .. 26]
+    """
+    print("Loading EMNIST Letters …")
+    data = _load_tfds('emnist/letters')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    return (x_train, y_train), (x_test, y_test)
+
+
+def load_emnist_digits():
+    """
+    EMNIST Digits — 10 classes (digits 0–9, balanced).
+    ~240,000 train / ~40,000 test samples.
+
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [0 .. 9]
+    """
+    print("Loading EMNIST Digits …")
+    data = _load_tfds('emnist/digits')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    return (x_train, y_train), (x_test, y_test)
+
+
+def load_mnist():
+    """
+    Classic MNIST — 10 classes (digits 0–9).
+    60,000 train / 10,000 test samples.
+
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [0 .. 9]
+    """
+    print("Loading MNIST …")
+    data = _load_tfds('mnist')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    return (x_train, y_train), (x_test, y_test)
+
+
+def load_kmnist():
+    """
+    Kuzushiji-MNIST — 10 Hiragana character classes.
+    60,000 train / 10,000 test samples.
+
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32  [0 .. 9]
+    """
+    print("Loading KMNIST …")
+    data = _load_tfds('kmnist')
+    (x_train, y_train), (x_test, y_test) = data
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    return (x_train, y_train), (x_test, y_test)
+
+
+def load_all_combined():
+    """
+    Loads EMNIST ByClass (digits + upper + lower) together with KMNIST,
+    giving the widest character coverage from a single call.
+
+    EMNIST ByClass labels are kept as-is (0–61).
+    KMNIST labels are offset to 62–71 to avoid collision.
+
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32
+    label_map : dict  {int → str}
+        Maps every integer label to a human-readable character string.
+    """
+    print("=" * 50)
+    print("Loading ALL combined datasets …")
+    print("=" * 50)
+
+    (ex_tr, ey_tr), (ex_te, ey_te) = load_emnist_byclass()
+    (kx_tr, ky_tr), (kx_te, ky_te) = load_kmnist()
+
+    # Offset KMNIST labels so they don't overlap with EMNIST's 0–61
+    kmnist_offset = len(EMNIST_BYCLASS_LABELS)  # 62
+    ky_tr = ky_tr + kmnist_offset
+    ky_te = ky_te + kmnist_offset
+
+    x_train = np.concatenate([ex_tr, kx_tr], axis=0)
+    y_train = np.concatenate([ey_tr, ky_tr], axis=0)
+    x_test  = np.concatenate([ex_te, kx_te], axis=0)
+    y_test  = np.concatenate([ey_te, ky_te], axis=0)
+
+    label_map = {i: ch for i, ch in enumerate(EMNIST_BYCLASS_LABELS)}
+    for i, ch in enumerate(KMNIST_LABELS):
+        label_map[kmnist_offset + i] = ch
+
+    num_classes = len(label_map)
+    print(f"\nCombined dataset ready:")
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    print(f"  Total classes: {num_classes}")
+
+    return (x_train, y_train), (x_test, y_test), label_map
+
+
+# ──────────────────────────────────────────────
+# Visualisation utility
+# ──────────────────────────────────────────────
+
+def visualize_samples(x, y, label_map=None, num_samples=9, title="Sample Images"):
+    """
+    Plot a random grid of images with their labels.
+
+    Parameters
+    ----------
+    x : np.ndarray  shape (N, 28, 28, 1)
+    y : np.ndarray  shape (N,)
+    label_map : dict {int → str} or None
+        If provided, integer labels are converted to character strings.
+    num_samples : int
+    title : str
+    """
+    plt.figure(figsize=(6, 6))
+    indices = random.sample(range(len(x)), min(num_samples, len(x)))
+    for i, idx in enumerate(indices):
+        plt.subplot(3, 3, i + 1)
+        plt.imshow(x[idx].squeeze(), cmap='gray')
+        label = label_map[y[idx]] if label_map else y[idx]
+        plt.title(f"'{label}'")
+        plt.axis('off')
+    plt.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+
+
+# ──────────────────────────────────────────────
+# Quick smoke-test
+# ──────────────────────────────────────────────
+
 if __name__ == "__main__":
-    # Load datasets
-    (x_train, y_train), (x_test, y_test) = load_emnist()
-    x_symbols, y_symbols = load_custom_symbols("../data/custom_symbols")  # optional
+    # ── Option A: load the biggest single dataset (recommended for full char coverage)
+    (x_train, y_train), (x_test, y_test) = load_emnist_byclass()
+    visualize_samples(x_train, y_train,
+                      label_map={i: ch for i, ch in enumerate(EMNIST_BYCLASS_LABELS)},
+                      title="EMNIST ByClass samples")
 
-    import matplotlib.pyplot as plt
-    import random
-
-    # Function to visualize a few samples
-    def visualize_samples(x, y, num_samples=9, title="Sample Images"):
-        plt.figure(figsize=(6,6))
-        indices = random.sample(range(len(x)), num_samples)
-        for i, idx in enumerate(indices):
-            plt.subplot(3,3,i+1)
-            plt.imshow(x[idx].squeeze(), cmap='gray')  # .squeeze() in case shape is (28,28,1)
-            plt.title(f"Label: {y[idx]}")
-            plt.axis('off')
-        plt.suptitle(title)
-        plt.show()
-
-    # Visualize 9 random EMNIST images
-    visualize_samples(x_train, y_train, title="Random EMNIST Samples")
-
-    # Optional: visualize custom symbols
-    visualize_samples(x_symbols, y_symbols, title="Random Symbol Samples")
+    # ── Option B: load everything combined (EMNIST + KMNIST Hiragana)
+    # (x_train, y_train), (x_test, y_test), label_map = load_all_combined()
+    # visualize_samples(x_train, y_train, label_map=label_map, title="All combined samples")
