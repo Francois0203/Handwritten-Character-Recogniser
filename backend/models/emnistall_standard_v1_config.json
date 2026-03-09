@@ -1,0 +1,23 @@
+{
+  "dataset": "emnist_all",
+  "val_split": 0.1,
+  "normalization": "minmax",
+  "augment": true,
+  "augmentation_kwargs": {},
+  "architecture": "standard",
+  "dropout_rate": 0.4,
+  "l2": 0.0001,
+  "label_smoothing": 0.1,
+  "optimizer": "adam",
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "use_cosine_decay": true,
+  "warmup_epochs": 5,
+  "epochs": 50,
+  "batch_size": 128,
+  "seed": 42,
+  "patience": 10,
+  "min_delta": 0.0001,
+  "output_dir": "runs/exp_emnist_full",
+  "run_name": ""
+}

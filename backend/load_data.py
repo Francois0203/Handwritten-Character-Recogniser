@@ -59,9 +59,9 @@ def _tfds_to_numpy(dataset):
 
 def _load_tfds(name, split_train='train', split_test='test'):
     """Generic loader for tensorflow_datasets supervised datasets."""
-    print(f"  Downloading / loading '{name}' — train split …")
+    print(f"  Downloading / loading '{name}' - train split ...")
     ds_train = tfds.load(name, split=split_train, as_supervised=True)
-    print(f"  Downloading / loading '{name}' — test split …")
+    print(f"  Downloading / loading '{name}' - test split ...")
     ds_test  = tfds.load(name, split=split_test,  as_supervised=True)
 
     x_train, y_train = _tfds_to_numpy(ds_train)
@@ -86,11 +86,11 @@ def load_emnist_byclass():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [0 .. 61]
     """
-    print("Loading EMNIST ByClass …")
+    print("Loading EMNIST ByClass ...")
     data = _load_tfds('emnist/byclass')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
-    print(f"  Classes: {len(EMNIST_BYCLASS_LABELS)}  →  {EMNIST_BYCLASS_LABELS}")
+    print(f"  Classes: {len(EMNIST_BYCLASS_LABELS)} -> {EMNIST_BYCLASS_LABELS}")
     return (x_train, y_train), (x_test, y_test)
 
 
@@ -105,7 +105,7 @@ def load_emnist_bymerge():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [0 .. 46]
     """
-    print("Loading EMNIST ByMerge …")
+    print("Loading EMNIST ByMerge ...")
     data = _load_tfds('emnist/bymerge')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
@@ -123,7 +123,7 @@ def load_emnist_letters():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [1 .. 26]
     """
-    print("Loading EMNIST Letters …")
+    print("Loading EMNIST Letters ...")
     data = _load_tfds('emnist/letters')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
@@ -141,7 +141,7 @@ def load_emnist_digits():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [0 .. 9]
     """
-    print("Loading EMNIST Digits …")
+    print("Loading EMNIST Digits ...")
     data = _load_tfds('emnist/digits')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
@@ -159,7 +159,7 @@ def load_mnist():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [0 .. 9]
     """
-    print("Loading MNIST …")
+    print("Loading MNIST ...")
     data = _load_tfds('mnist')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
@@ -177,7 +177,7 @@ def load_kmnist():
         x shape: (N, 28, 28, 1)  uint8
         y shape: (N,)            int32  [0 .. 9]
     """
-    print("Loading KMNIST …")
+    print("Loading KMNIST ...")
     data = _load_tfds('kmnist')
     (x_train, y_train), (x_test, y_test) = data
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
@@ -201,7 +201,7 @@ def load_all_combined():
         Maps every integer label to a human-readable character string.
     """
     print("=" * 50)
-    print("Loading ALL combined datasets …")
+    print("Loading ALL combined datasets ...")
     print("=" * 50)
 
     (ex_tr, ey_tr), (ex_te, ey_te) = load_emnist_byclass()
@@ -223,6 +223,57 @@ def load_all_combined():
 
     num_classes = len(label_map)
     print(f"\nCombined dataset ready:")
+    print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
+    print(f"  Total classes: {num_classes}")
+
+    return (x_train, y_train), (x_test, y_test), label_map
+
+
+def load_emnist_all():
+    """
+    Loads multiple EMNIST datasets combined (without KMNIST).
+    This is useful when KMNIST server is unavailable.
+    
+    Combines:
+    - EMNIST ByClass: digits + upper + lower (62 classes) -> labels 0-61
+    - MNIST: classic digits (10 classes) -> labels 62-71
+    
+    Returns
+    -------
+    (x_train, y_train), (x_test, y_test)
+        x shape: (N, 28, 28, 1)  uint8
+        y shape: (N,)            int32
+    label_map : dict  {int -> str}
+        Maps every integer label to a human-readable character string.
+    """
+    print("=" * 50)
+    print("Loading EMNIST All (ByClass + MNIST) ...")
+    print("=" * 50)
+
+    # Load EMNIST ByClass (62 classes: 0-9, A-Z, a-z)
+    (ex_tr, ey_tr), (ex_te, ey_te) = load_emnist_byclass()
+    
+    # Load MNIST (10 classes: 0-9)
+    (mx_tr, my_tr), (mx_te, my_te) = load_mnist()
+
+    # Offset MNIST labels so they don't overlap with EMNIST's 0-61
+    mnist_offset = len(EMNIST_BYCLASS_LABELS)  # 62
+    my_tr = my_tr + mnist_offset
+    my_te = my_te + mnist_offset
+
+    # Combine datasets
+    x_train = np.concatenate([ex_tr, mx_tr], axis=0)
+    y_train = np.concatenate([ey_tr, my_tr], axis=0)
+    x_test  = np.concatenate([ex_te, mx_te], axis=0)
+    y_test  = np.concatenate([ey_te, my_te], axis=0)
+
+    # Build label map
+    label_map = {i: ch for i, ch in enumerate(EMNIST_BYCLASS_LABELS)}
+    for i in range(10):
+        label_map[mnist_offset + i] = f"MNIST_{i}"
+
+    num_classes = len(label_map)
+    print(f"\nCombined EMNIST dataset ready:")
     print(f"  Train: {x_train.shape}  |  Test: {x_test.shape}")
     print(f"  Total classes: {num_classes}")
 

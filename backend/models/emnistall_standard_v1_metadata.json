@@ -1,0 +1,32 @@
+{
+  "model_name": "emnistall_standard_v1",
+  "dataset": "emnist_all",
+  "architecture": "standard",
+  "num_classes": 72,
+  "test_accuracy": 0.8102800250053406,
+  "test_loss": 1.3484488725662231,
+  "trained_date": "2026-03-09 16:30:16",
+  "training_config": {
+    "dataset": "emnist_all",
+    "val_split": 0.1,
+    "normalization": "minmax",
+    "augment": true,
+    "augmentation_kwargs": {},
+    "architecture": "standard",
+    "dropout_rate": 0.4,
+    "l2": 0.0001,
+    "label_smoothing": 0.1,
+    "optimizer": "adam",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "use_cosine_decay": true,
+    "warmup_epochs": 5,
+    "epochs": 50,
+    "batch_size": 128,
+    "seed": 42,
+    "patience": 10,
+    "min_delta": 0.0001,
+    "output_dir": "runs/exp_emnist_full",
+    "run_name": ""
+  }
+}

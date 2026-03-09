@@ -60,6 +60,7 @@ from load_data import (
     load_mnist,
     load_kmnist,
     load_all_combined,
+    load_emnist_all,
 )
 from preprocess_data import preprocess_pipeline
 from build_model import build_model
@@ -82,7 +83,7 @@ logger = logging.getLogger("train")
 DatasetName = Literal[
     "mnist", "kmnist",
     "emnist_byclass", "emnist_bymerge", "emnist_letters", "emnist_digits",
-    "all_combined",
+    "all_combined", "emnist_all",
 ]
 
 # Maps dataset name → (loader_fn, num_classes, label_map_or_None)
@@ -95,6 +96,7 @@ _DATASET_REGISTRY: Dict[str, dict] = {
     "emnist_letters":  {"fn": load_emnist_letters, "num_classes": 37,  "labels": None},
     "emnist_digits":   {"fn": load_emnist_digits,  "num_classes": 10,  "labels": DIGIT_LABELS},
     "all_combined":    {"fn": load_all_combined,   "num_classes": 72,  "labels": None},
+    "emnist_all":      {"fn": load_emnist_all,     "num_classes": 72,  "labels": None},
 }
 
 
@@ -334,7 +336,7 @@ def load_dataset(
     entry = _DATASET_REGISTRY[dataset_name]
     num_classes = entry["num_classes"]
 
-    if dataset_name == "all_combined":
+    if dataset_name in ("all_combined", "emnist_all"):
         (x_train, y_train), (x_test, y_test), label_map = entry["fn"]()
         num_classes = len(label_map)
     else:
