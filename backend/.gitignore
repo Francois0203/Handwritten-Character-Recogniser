@@ -5,3 +5,32 @@ venv/
 # Python cache files
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+
+# Training runs and experiments (too large for Git)
+runs/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Models folder is INCLUDED (models/ contains production-ready models for deployment)
+# Individual large model files can be added to Git LFS if needed

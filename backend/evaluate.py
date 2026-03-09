@@ -57,6 +57,9 @@ from load_data import (
 )
 from preprocess_data import normalize
 
+# Import custom learning rate schedule to register it with Keras
+from train import WarmupCosineDecay  # noqa: F401
+
 # ──────────────────────────────────────────────
 # Logging
 # ──────────────────────────────────────────────
@@ -511,7 +514,20 @@ def evaluate(config: EvalConfig) -> dict:
     logger.info("Loading model from: %s", config.model_path)
     if not Path(config.model_path).exists():
         raise FileNotFoundError(f"Model not found at: {config.model_path}")
-    model = tf.keras.models.load_model(config.model_path)
+    
+    # Load without compiling to avoid issues with custom LR schedules
+    # (we only need the forward pass for evaluation, not the optimizer)
+    model = tf.keras.models.load_model(config.model_path, compile=False)
+    
+    # Recompile for evaluation metrics
+    model.compile(
+        loss=tf.keras.losses.CategoricalCrossentropy(),
+        metrics=[
+            tf.keras.metrics.CategoricalAccuracy(name="accuracy"),
+            tf.keras.metrics.TopKCategoricalAccuracy(k=config.top_k, name=f"top{config.top_k}_accuracy"),
+        ],
+    )
+    
     logger.info("Model loaded — parameters: %s", f"{model.count_params():,}")
     model.summary(print_fn=logger.info, line_length=80)
 

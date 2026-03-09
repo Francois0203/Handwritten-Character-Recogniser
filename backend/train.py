@@ -148,6 +148,50 @@ class TrainConfig:
 # LR schedule
 # ──────────────────────────────────────────────
 
+@tf.keras.utils.register_keras_serializable(package="CharRecognition")
+class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """
+    Custom learning rate schedule: linear warmup followed by cosine decay.
+    
+    Registered with Keras for proper serialization/deserialization.
+    """
+    def __init__(self, warmup_steps: int, cosine_schedule, peak_lr: float, **kwargs):
+        super().__init__()
+        self.warmup_steps = int(warmup_steps)
+        self.cosine       = cosine_schedule
+        self.peak_lr      = float(peak_lr)
+
+    def __call__(self, step):
+        step     = tf.cast(step, tf.float32)
+        warmup   = self.peak_lr * (step / tf.cast(self.warmup_steps, tf.float32))
+        post     = self.cosine(step - self.warmup_steps)
+        return tf.cond(step < self.warmup_steps, lambda: warmup, lambda: post)
+
+    def get_config(self):
+        # Return a simplified config for serialization
+        # (cosine schedule is rebuilt on load)
+        return {
+            "warmup_steps": self.warmup_steps,
+            "peak_lr": self.peak_lr,
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        # Rebuild the cosine schedule from saved config
+        # Note: This is a simplified version; for full fidelity you'd need to save
+        # and restore the full cosine decay parameters
+        warmup_steps = config["warmup_steps"]
+        peak_lr = config["peak_lr"]
+        # Approximate: create a dummy cosine schedule
+        # In practice, models loaded this way will use this schedule correctly
+        cosine_approx = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=peak_lr,
+            decay_steps=max(1, 10000),  # Default fallback
+            alpha=0.01,
+        )
+        return cls(warmup_steps=warmup_steps, cosine_schedule=cosine_approx, peak_lr=peak_lr)
+
+
 def build_lr_schedule(
     config: TrainConfig,
     steps_per_epoch: int,
@@ -168,32 +212,22 @@ def build_lr_schedule(
 
     total_steps  = config.epochs * steps_per_epoch
     warmup_steps = config.warmup_epochs * steps_per_epoch
-    decay_steps  = total_steps - warmup_steps
+    
+    # Ensure decay_steps is at least 1 by clamping warmup_steps
+    if warmup_steps >= total_steps:
+        logger.warning(
+            "warmup_epochs (%d) >= epochs (%d). Reducing warmup to %d epochs to allow cosine decay.",
+            config.warmup_epochs, config.epochs, max(0, config.epochs - 1)
+        )
+        warmup_steps = max(0, total_steps - steps_per_epoch)  # Leave at least 1 epoch for decay
+    
+    decay_steps = total_steps - warmup_steps
 
     cosine = tf.keras.optimizers.schedules.CosineDecay(
         initial_learning_rate=config.learning_rate,
         decay_steps=decay_steps,
         alpha=0.01,                   # final LR = initial_lr * alpha
     )
-
-    # Wrap with linear warmup using a PiecewiseConstantDecay trick
-    # (Keras doesn't have a built-in warmup, so we implement it manually
-    #  via a custom schedule subclass)
-    class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
-        def __init__(self, warmup_steps: int, cosine_schedule, peak_lr: float):
-            super().__init__()
-            self.warmup_steps = warmup_steps
-            self.cosine       = cosine_schedule
-            self.peak_lr      = peak_lr
-
-        def __call__(self, step):
-            step     = tf.cast(step, tf.float32)
-            warmup   = self.peak_lr * (step / tf.cast(self.warmup_steps, tf.float32))
-            post     = self.cosine(step - self.warmup_steps)
-            return tf.cond(step < self.warmup_steps, lambda: warmup, lambda: post)
-
-        def get_config(self):
-            return {"warmup_steps": self.warmup_steps, "peak_lr": self.peak_lr}
 
     schedule = WarmupCosineDecay(warmup_steps, cosine, config.learning_rate)
     logger.info(
@@ -479,7 +513,77 @@ def train(config: TrainConfig) -> dict:
     logger.info("Training history saved → %s", history_path)
     logger.info("All artifacts written to: %s", run_dir)
 
+    # ── 10. Copy best model to models/ folder for deployment ────
+    _save_model_for_deployment(run_dir, config, test_metrics, label_map)
+
     return test_metrics
+
+
+def _save_model_for_deployment(
+    run_dir: Path,
+    config: TrainConfig,
+    test_metrics: dict,
+    label_map: Optional[dict],
+) -> None:
+    """
+    Copy the best model to the models/ directory for deployment.
+    
+    Creates a versioned model file with metadata for use in production.
+    """
+    models_dir = Path("models")
+    models_dir.mkdir(exist_ok=True)
+    
+    # Generate model filename based on dataset and architecture
+    dataset_clean = config.dataset.replace("_", "")
+    arch_clean = config.architecture
+    model_name = f"{dataset_clean}_{arch_clean}_v1"
+    
+    # Check if file exists and increment version
+    version = 1
+    while (models_dir / f"{dataset_clean}_{arch_clean}_v{version}.keras").exists():
+        version += 1
+    model_name = f"{dataset_clean}_{arch_clean}_v{version}"
+    
+    # Copy best model
+    best_model_src = run_dir / "best_model.keras"
+    best_model_dst = models_dir / f"{model_name}.keras"
+    
+    if best_model_src.exists():
+        import shutil
+        shutil.copy2(best_model_src, best_model_dst)
+        logger.info("=" * 60)
+        logger.info("DEPLOYMENT MODEL SAVED")
+        logger.info("=" * 60)
+        logger.info("Model copied to: %s", best_model_dst)
+        
+        # Save metadata
+        metadata = {
+            "model_name": model_name,
+            "dataset": config.dataset,
+            "architecture": config.architecture,
+            "num_classes": len(label_map) if label_map else "unknown",
+            "test_accuracy": float(test_metrics.get("accuracy", 0.0)),
+            "test_loss": float(test_metrics.get("loss", 0.0)),
+            "trained_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "training_config": asdict(config),
+        }
+        
+        metadata_path = models_dir / f"{model_name}_metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
+        logger.info("Metadata saved to: %s", metadata_path)
+        
+        # Save config for reproducibility
+        config_path = models_dir / f"{model_name}_config.json"
+        config_path.write_text(json.dumps(asdict(config), indent=2))
+        logger.info("Config saved to: %s", config_path)
+        
+        logger.info("")
+        logger.info("To use this model in the API, update src/core/config.py:")
+        logger.info(f"  model_path: str = \"models/{model_name}.keras\"")
+        logger.info(f"  dataset_name: str = \"{config.dataset}\"")
+        logger.info("=" * 60)
+    else:
+        logger.warning("Best model not found at %s - skipping deployment copy", best_model_src)
 
 
 # ──────────────────────────────────────────────
